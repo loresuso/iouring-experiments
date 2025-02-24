@@ -1,0 +1,48 @@
+#!/usr/bin/env bpftrace
+
+#define IO_URING_OPENAT 18
+
+#define F_MODE_READ 1 << 0
+#define F_MODE_WRITE 1 << 1
+
+tracepoint:io_uring:io_uring_complete
+{
+    $req = (struct io_kiocb *)args->req;
+
+    $opcode = $req->opcode;
+    if ($opcode == IO_URING_OPENAT) 
+    {
+        printf("[io_uring_complete]: opcode=%u, flags=%d\n", $req->opcode, $req->flags);
+    }    
+}
+
+
+// Note: file permissions could potentially be reconstructed as apparmor is doing:
+// https://elixir.bootlin.com/linux/v6.13.4/source/security/apparmor/include/file.h#L107
+// In general, it is a matter of using f_flags and f_mode fields. 
+// We will try to convert to the simplest event we can (e.g. dirfd for openat is a little bit hard to get here)
+kprobe:security_file_open 
+{
+    if (comm == "open")
+    {
+        $file = (struct file *)arg0;
+
+        @open_pid[pid] = pid;
+        printf("[security_file_open]: filename=%s fp=%p f_mode=%d f_flags=%d\n", 
+            str($file->f_path.dentry->d_name.name), 
+            $file, 
+            $file->f_mode, 
+            $file->f_flags);
+    }
+}
+
+kprobe:fd_install
+{
+    $fd = arg0;
+    $file = (struct file *)arg1;
+    if (@open_pid[pid] && comm == "open")
+    {
+        printf("[fd_install]: fd=%d fp=%p\n", $fd, $file);
+        delete(@open_pid[pid]);
+    }
+}
