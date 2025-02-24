@@ -36,6 +36,11 @@ kprobe:security_file_open
     }
 }
 
+kprobe:security_socket_connect 
+{
+    
+}
+
 kprobe:fd_install
 {
     $fd = arg0;
